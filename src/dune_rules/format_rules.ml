@@ -57,8 +57,8 @@ let action =
     end in
     Action.Extension (module M)
 
-let gen_rules_output sctx (config : Format_config.t) ~version ~dialects
-    ~expander ~output_dir =
+let gen_rules_output sctx (config : Ordered_set_lang.t Format_config.Generic.t)
+    ~version ~dialects ~expander ~output_dir =
   assert (formatted_dir_basename = Path.Build.basename output_dir);
   let loc = Format_config.loc config in
   let dir = Path.Build.parent_exn output_dir in
@@ -116,8 +116,14 @@ let gen_rules_output sctx (config : Format_config.t) ~version ~dialects
   in
   let open Memo.O in
   let* () =
-    Source_tree.files_of source_dir
-    >>= Memo.parallel_iter_set (module Path.Source.Set) ~f:setup_formatting
+    let osl = Format_config.Generic.files config in
+    (let+ files = Source_tree.files_of source_dir in
+     Ordered_set_lang.eval
+       ~parse:(fun ~loc name -> Path.Source.parse_string_exn ~loc name)
+       ~eq:Path.Source.equal
+       ~standard:(Path.Source.Set.to_list files)
+       osl)
+    >>= Memo.parallel_iter ~f:setup_formatting
   in
   Rules.Produce.Alias.add_deps alias_formatted (Action_builder.return ())
 
