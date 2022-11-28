@@ -88,6 +88,7 @@ type ('enabled_for, 'files) very_generic_t =
   { loc : Loc.t
   ; enabled_for : 'enabled_for
   ; files : 'files
+  ; options : (string * string option) list
   }
 
 type 'files generic_t = (Enabled_for.t, 'files) very_generic_t
@@ -96,55 +97,77 @@ type t = unit generic_t
 
 let includes t lang = Enabled_for.includes t.enabled_for lang
 
-let to_dyn { enabled_for; loc = _; files = _ } =
+let to_dyn { enabled_for; loc = _; files = (); options } =
   let open Dyn in
-  record [ ("enabled_for", Enabled_for.to_dyn enabled_for) ]
+  record
+    [ ("enabled_for", Enabled_for.to_dyn enabled_for)
+    ; ("options", list (pair string (option string)) options)
+    ]
 
 let dparse_args =
   let+ loc = loc
   and+ enabled_for = fields Enabled_for.field_ext in
-  ({ loc; enabled_for; files = () }, [])
+  ({ loc; enabled_for; files = (); options = [] }, [])
 
 let enabled_for_all =
-  { loc = Loc.none; enabled_for = Enabled_for.All; files = () }
+  { loc = Loc.none; enabled_for = Enabled_for.All; files = (); options = [] }
 
 let disabled =
   { loc = Loc.none
   ; enabled_for = Enabled_for.Only Language.Set.empty
   ; files = ()
+  ; options = []
   }
 
 module Generic = struct
   type 'files t = 'files generic_t
 
+  let option =
+    let+ name = string
+    and+ value =
+      (let+ value = string in
+       Some value)
+      <|> return None
+    in
+    (name, value)
+
   let dune2_record_syntax ~files =
     let+ files = Dune_lang.Syntax.since Dune_lang.Stanza.syntax (3, 5) >>> files
+    and+ options = field "options" (repeat option)
     and+ ef = Enabled_for.field in
     ( files
+    , options
     , match ef with
       | Some l -> Enabled_for.Only (Language.Set.of_list l)
       | None -> All )
 
   let dune2_dec ~default_files ~files =
     let+ loc = loc
-    and+ files, enabled_for =
+    and+ files, options, enabled_for =
       peek_exn >>= function
       | Atom (_, _) ->
         keyword "disabled"
-        >>> return (default_files, Enabled_for.Only Language.Set.empty)
+        >>> return (default_files, [], Enabled_for.Only Language.Set.empty)
       | _ -> fields (dune2_record_syntax ~files)
     in
-    { loc; enabled_for; files }
+    { loc; enabled_for; files; options }
 
   let field ~since ~default_files ~files =
     field_o "formatting"
       (Dune_lang.Syntax.since Dune_lang.Stanza.syntax since
       >>> dune2_dec ~default_files ~files)
 
-  let equal ~files { enabled_for; files = f; loc = _ } t =
-    Enabled_for.equal enabled_for t.enabled_for && files f t.files
+  let equal ~files { enabled_for; files = f; options; loc = _ } t =
+    Enabled_for.equal enabled_for t.enabled_for
+    && files f t.files
+    && List.equal
+         (fun (a, b) (c, d) ->
+           String.equal a c && Option.equal String.equal b d)
+         options t.options
 
   let files { files; _ } = files
+
+  let options { options; _ } = options
 
   let set_files t files = { t with files }
 end
@@ -173,10 +196,10 @@ let encode_explicit conf =
   let open Dune_lang.Encoder in
   [ field_i "formatting" encode_formatting conf ] |> record_fields |> List.hd
 
-let to_explicit { loc; enabled_for; files } =
+let to_explicit { loc; enabled_for; files; options } =
   match enabled_for with
   | Enabled_for.All -> None
-  | Only l -> Some { loc; enabled_for = l; files }
+  | Only l -> Some { loc; enabled_for = l; files; options }
 
 let encode_opt t =
   to_explicit t |> Option.map ~f:(fun c -> encode_explicit c.enabled_for)

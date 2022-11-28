@@ -99,10 +99,20 @@ let format { file_kinds = { Ml_kind.Dict.intf; impl }; _ } = function
   | Impl -> impl.format
 
 let ocaml =
-  let format kind =
+  let format options kind =
     let flag_of_kind = function
       | Ml_kind.Impl -> "--impl"
       | Intf -> "--intf"
+    in
+    let config =
+      options
+      |> List.map ~f:(fun (name, value) ->
+             "--" ^ name
+             ^
+             match value with
+             | None -> ""
+             | Some value -> "=" ^ value)
+      |> String.concat ~sep:","
     in
     let module S = String_with_vars in
     Action.chdir
@@ -110,17 +120,18 @@ let ocaml =
       (Action.run
          (S.make_text Loc.none "ocamlformat")
          [ S.make_text Loc.none (flag_of_kind kind)
+         ; S.make_text Loc.none ("--config=\"" ^ config ^ "\"")
          ; S.make_pform Loc.none (Var Input_file)
          ])
   in
-  let file_kind kind extension =
+  let file_kind options kind extension =
     { File_kind.kind
     ; extension
     ; preprocess = None
     ; format =
         Some
           ( Loc.none
-          , format kind
+          , format options kind
           , [ ".ocamlformat"; ".ocamlformat-ignore"; ".ocamlformat-enable" ] )
     }
   in

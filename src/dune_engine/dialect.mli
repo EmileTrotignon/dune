@@ -32,7 +32,7 @@ val extension : t -> Ml_kind.t -> string
 
 val preprocess : t -> Ml_kind.t -> (Loc.t * Dune_lang.Action.t) option
 
-val format : t -> Ml_kind.t -> (Loc.t * Dune_lang.Action.t * string list) option
+val format : t -> Ml_kind.t -> ocamlformat_options:(string*string option) list -> (Loc.t * Dune_lang.Action.t * string list) option
 
 val ocaml : t
 
