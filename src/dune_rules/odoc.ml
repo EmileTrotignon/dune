@@ -210,6 +210,19 @@ let run_odoc sctx ~dir command ~flags_for args =
   Action_builder.with_no_targets deps
   >>> Command.run ~dir program [ A command; base_flags; S args ]
 
+let run_sherlodoc sctx ~dir odocls =
+  let build_dir = (Super_context.context sctx).build_dir in
+  let open Memo.O in
+  let* program =
+    Super_context.resolve_program sctx ~dir:build_dir "sherlodoc_index" ~loc:None
+      ~hint:"opam install sherlodoc"
+  in
+  let+ base_flags =
+    Memo.return (Command.Args.As [ "--format=js"; "--empty-payload"; ])
+  in
+  let db = Path.Build.relative (Path.as_in_build_dir_exn dir) "db.js" in
+  Command.run ~dir program [ base_flags; A "--db"; Target db; Deps odocls ]
+
 let module_deps (m : Module.t) ~obj_dir ~(dep_graphs : Dep_graph.Ml_kind.t) =
   Action_builder.dyn_paths_unit
     (let open Action_builder.O in
@@ -369,6 +382,7 @@ let setup_html sctx (odoc_file : odoc_artefact) =
       ; A support_relative
       ; A "--theme-uri"
       ; A support_relative
+      ; A "--with-search"
       ; Dep (Path.build odoc_file.odocl_file)
       ; Hidden_targets [ odoc_file.html_file ]
       ]
@@ -639,6 +653,15 @@ let setup_pkg_odocl_rules_def =
 let setup_pkg_odocl_rules sctx ~pkg ~libs : unit Memo.t =
   Memo.With_implicit_output.exec setup_pkg_odocl_rules_def (sctx, pkg, libs)
 
+let setup_search_index_rule sctx target odocs =
+  let odocls = List.map odocs ~f:(fun o -> Path.build o.odocl_file) in
+  let ctx = Super_context.context sctx in
+  let open Memo.O in
+  let* act =
+    run_sherlodoc sctx ~dir:(Path.build (Paths.html ctx target)) odocls
+  in
+  add_rule sctx act
+
 let setup_lib_html_rules_def =
   let module Input = struct
     module Super_context = Super_context.As_memo_key
@@ -682,11 +705,13 @@ let setup_pkg_html_rules_def =
       Memo.parallel_map libs ~f:(fun lib -> odoc_artefacts sctx (Lib lib))
     in
     let odocs = List.concat (pkg_odocs :: lib_odocs) in
+    let* () = setup_search_index_rule sctx (Pkg pkg) odocs in
     let html_files = List.map ~f:(fun o -> Path.build o.html_file) odocs in
     let static_html = List.map ~f:Path.build (static_html ctx) in
+    let index_db = Path.Build.relative (Paths.html ctx (Pkg pkg)) "db.js" in
     Rules.Produce.Alias.add_deps
       (Dep.html_alias ctx (Pkg pkg))
-      (Action_builder.paths (List.rev_append static_html html_files))
+      (Action_builder.paths (Path.build index_db :: List.rev_append static_html html_files))
   in
   setup_pkg_rules_def "setup-package-html-rules" f
 

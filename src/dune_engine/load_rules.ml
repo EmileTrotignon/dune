@@ -551,6 +551,7 @@ end = struct
           "[gen_rules] returned rules in a directory that is not a descendant \
            of the directory it was called for"
           [ ("dir", Path.Build.to_dyn dir)
+          ; ("rule-dir", Path.Build.to_dyn p)
           ; ( "example"
             , match dir_rules with
               | { rules = r :: _; _ } ->
