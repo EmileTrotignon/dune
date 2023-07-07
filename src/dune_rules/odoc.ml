@@ -210,18 +210,28 @@ let run_odoc sctx ~dir command ~flags_for args =
   Action_builder.with_no_targets deps
   >>> Command.run ~dir program [ A command; base_flags; S args ]
 
-let run_sherlodoc sctx ~dir odocls =
-  let build_dir = (Super_context.context sctx).build_dir in
+let sherlodoc_flags sctx build_dir =
   let open Memo.O in
+  let+ conf = Super_context.odoc sctx ~dir:build_dir in
+  match conf.Env_node.Odoc.search with
+  | Env_node.Odoc.Disabled -> None
+  | Sherlodoc { flags } -> Some (Command.Args.dyn flags)
+
+let run_sherlodoc sctx ~dir odocls =
+  let context = Super_context.context sctx in
+  let build_dir = context.build_dir in
+  let open Memo.O in
+  let* flags = sherlodoc_flags sctx build_dir in
   let* program =
-    Super_context.resolve_program sctx ~dir:build_dir "sherlodoc_index" ~loc:None
-      ~hint:"opam install sherlodoc"
+    Super_context.resolve_program sctx ~dir:build_dir "sherlodoc_index"
+      ~loc:None ~hint:"opam install sherlodoc"
   in
-  let+ base_flags =
-    Memo.return (Command.Args.As [ "--format=js"; "--empty-payload"; ])
-  in
+  let+ base_flags = Memo.return (Command.Args.As [ "--format=js" ]) in
+  let open Option.O in
+  let+ flags = flags in
   let db = Path.Build.relative (Path.as_in_build_dir_exn dir) "db.js" in
-  Command.run ~dir program [ base_flags; A "--db"; Target db; Deps odocls ]
+  Command.run ~dir program
+    [ flags; base_flags; A "--db"; Target db; Deps odocls ]
 
 let module_deps (m : Module.t) ~obj_dir ~(dep_graphs : Dep_graph.Ml_kind.t) =
   Action_builder.dyn_paths_unit
@@ -372,20 +382,31 @@ let setup_html sctx (odoc_file : odoc_artefact) =
   let support_relative =
     Path.reach (Path.build odoc_support_path) ~from:(Path.build html_output)
   in
+  let* with_search =
+    let build_dir = ctx.build_dir in
+    let+ conf = Super_context.odoc sctx ~dir:build_dir in
+    match conf.search with
+    | Disabled -> false
+    | Sherlodoc _ -> true
+  in
+  let search_flags =
+    if with_search then Command.Args.[ A "--with-search" ] else []
+  in
   let* run_odoc =
     run_odoc sctx
       ~dir:(Path.build (Paths.html_root ctx))
       "html-generate" ~flags_for:None
-      [ A "-o"
-      ; Path (Path.build (Paths.html_root ctx))
-      ; A "--support-uri"
-      ; A support_relative
-      ; A "--theme-uri"
-      ; A support_relative
-      ; A "--with-search"
-      ; Dep (Path.build odoc_file.odocl_file)
-      ; Hidden_targets [ odoc_file.html_file ]
-      ]
+      (Command.Args.
+         [ A "-o"
+         ; Path (Path.build (Paths.html_root ctx))
+         ; A "--support-uri"
+         ; A support_relative
+         ; A "--theme-uri"
+         ; A support_relative
+         ; Dep (Path.build odoc_file.odocl_file)
+         ; Hidden_targets [ odoc_file.html_file ]
+         ]
+      @ search_flags)
   in
   add_rule sctx
     (Action_builder.progn
@@ -660,7 +681,9 @@ let setup_search_index_rule sctx target odocs =
   let* act =
     run_sherlodoc sctx ~dir:(Path.build (Paths.html ctx target)) odocls
   in
-  add_rule sctx act
+  match act with
+  | None -> Memo.return ()
+  | Some act -> add_rule sctx act
 
 let setup_lib_html_rules_def =
   let module Input = struct
@@ -711,7 +734,8 @@ let setup_pkg_html_rules_def =
     let index_db = Path.Build.relative (Paths.html ctx (Pkg pkg)) "db.js" in
     Rules.Produce.Alias.add_deps
       (Dep.html_alias ctx (Pkg pkg))
-      (Action_builder.paths (Path.build index_db :: List.rev_append static_html html_files))
+      (Action_builder.paths
+         (Path.build index_db :: List.rev_append static_html html_files))
   in
   setup_pkg_rules_def "setup-package-html-rules" f
 

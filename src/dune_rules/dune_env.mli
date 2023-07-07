@@ -19,7 +19,14 @@ module Stanza : sig
       | Fatal
       | Nonfatal
 
-    type t = { warnings : warnings option }
+    type search =
+      | Sherlodoc of { flags : Ordered_set_lang.Unexpanded.t }
+      | Disabled
+
+    type t =
+      { warnings : warnings option
+      ; search : search option
+      }
 
     val decode : t Dune_lang.Decoder.t
   end

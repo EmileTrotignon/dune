@@ -5,7 +5,14 @@ module Odoc = struct
     | Fatal
     | Nonfatal
 
-  type t = { warnings : warnings }
+  type search =
+    | Sherlodoc of { flags : string list Action_builder.t }
+    | Disabled
+
+  type t =
+    { warnings : warnings
+    ; search : search
+    }
 end
 
 module Coq = struct
@@ -199,11 +206,33 @@ let make ~dir ~inherit_from ~scope ~config_stanza ~profile ~expander
     let open Odoc in
     let root =
       (* DUNE3: Enable for dev profile in the future *)
-      { warnings = Nonfatal }
+      { warnings = Nonfatal
+      ; search = Sherlodoc { flags = Action_builder.return [] }
+      }
     in
-    inherited ~field:odoc ~root (fun { warnings } ->
-        Memo.return
-          { warnings = Option.value config.odoc.warnings ~default:warnings })
+    inherited ~field:odoc ~root (fun { warnings; search } ->
+        let+ expander = Memo.Lazy.force expander in
+        let expander = Expander.set_dir expander ~dir in
+        let old_search = search in
+        let search =
+          config.odoc.search
+          |> Option.map ~f:(function
+               | Dune_env.Stanza.Odoc.Disabled -> Disabled
+               | Sherlodoc { flags } ->
+                 let standard =
+                   match old_search with
+                   | Disabled -> Action_builder.return []
+                   | Sherlodoc { flags } -> flags
+                 in
+                 let flags =
+                   Expander.expand_and_eval_set expander flags ~standard
+                 in
+                 Sherlodoc { flags })
+          |> Option.value ~default:old_search
+        in
+        { warnings = Option.value config.odoc.warnings ~default:warnings
+        ; search
+        })
   in
   let default_coq_flags = Action_builder.return [ "-q" ] in
   let coq : Coq.t Action_builder.t Memo.Lazy.t =

@@ -7,7 +7,14 @@ module Odoc : sig
     | Fatal
     | Nonfatal
 
-  type t = { warnings : warnings }
+  type search =
+    | Sherlodoc of { flags : string list Action_builder.t }
+    | Disabled
+
+  type t =
+    { warnings : warnings
+    ; search : search
+    }
 end
 
 module Coq : sig

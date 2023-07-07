@@ -49,9 +49,16 @@ module Stanza = struct
       | Fatal
       | Nonfatal
 
-    type t = { warnings : warnings option }
+    type search =
+      | Sherlodoc of { flags : Ordered_set_lang.Unexpanded.t }
+      | Disabled
 
-    let empty = { warnings = None }
+    type t =
+      { warnings : warnings option
+      ; search : search option
+      }
+
+    let empty = { warnings = None; search = None }
 
     let warnings_equal x y =
       match (x, y) with
@@ -62,10 +69,20 @@ module Stanza = struct
 
     let warnings_decode = enum [ ("fatal", Fatal); ("nonfatal", Nonfatal) ]
 
+    let search_decode =
+      enum'
+        [ ("disabled", return Disabled)
+        ; ( "sherlodoc"
+          , fields
+            @@ let+ flags = Ordered_set_lang.Unexpanded.field "flags" in
+               Sherlodoc { flags } )
+        ]
+
     let decode =
       fields
-      @@ let+ warnings = field_o "warnings" warnings_decode in
-         { warnings }
+      @@ let+ warnings = field_o "warnings" warnings_decode
+         and+ search = field_o "search" search_decode in
+         { warnings; search }
   end
 
   type config =
